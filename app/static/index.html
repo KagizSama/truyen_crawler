@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NOVEL AI</title>
+    <link rel="stylesheet" href="/static/style.css?v=6">
+    <link
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;600&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div class="app-container">
+        <header class="chat-header">
+            <div class="header-left">
+                <img src="/static/avatar.jpg" alt="Logo" class="app-logo">
+                <div class="logo-text">NOVEL<span class="highlight"> AI</span></div>
+            </div>
+            <div class="status-indicator"></div>
+        </header>
+
+        <main class="chat-area" id="chat-area">
+            <div class="welcome-message">
+                <div class="system-msg">
+                    <span class="cmd-prefix">></span> SYSTEM ONLINE. <br>
+                    <span class="cmd-prefix">></span> AGENT INITIALIZED. <br>
+                    <span class="cmd-prefix">></span> AWAITING INPUT...
+                </div>
+            </div>
+        </main>
+
+        <footer class="input-area">
+            <div class="input-container">
+                <input type="text" id="user-input" placeholder="Enter command or query..." autocomplete="off">
+                <button id="send-btn">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" />
+                    </svg>
+                </button>
+            </div>
+        </footer>
+    </div>
+    <script src="/static/script.js?v=6"></script>
+</body>
+
+</html>

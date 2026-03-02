@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from app.services.search_service import SearchService
 from app.services.crawler import CrawlerService
 from app.db.session import AsyncSessionLocal
-from app.db.models import Story
+from app.db.models import Story, Chapter
 from sqlalchemy import select, func
 from loguru import logger
 import random
@@ -169,19 +169,25 @@ class BrowseLibraryInput(BaseModel):
     action: str = Field(
         description="Hành động cần thực hiện: 'list_genres' (liệt kê thể loại), "
                     "'list_stories' (liệt kê truyện theo thể loại), "
-                    "'random_recommend' (gợi ý truyện ngẫu nhiên)"
+                    "'random_recommend' (gợi ý truyện ngẫu nhiên), "
+                    "'get_story_info' (xem thông tin chi tiết một truyện)"
     )
     genre: Optional[str] = Field(
         default=None,
         description="Thể loại để lọc (ví dụ: 'Tiên Hiệp', 'Ngôn Tình'). "
                     "Chỉ cần thiết cho action 'list_stories' và 'random_recommend'."
     )
+    title: Optional[str] = Field(
+        default=None,
+        description="Tên truyện cần tra cứu thông tin. "
+                    "Chỉ cần thiết cho action 'get_story_info'."
+    )
 
 
 @tool("browse_library", args_schema=BrowseLibraryInput, return_direct=False)
-async def browse_library_tool(action: str, genre: Optional[str] = None) -> Dict[str, Any]:
+async def browse_library_tool(action: str, genre: Optional[str] = None, title: Optional[str] = None) -> Dict[str, Any]:
     """
-    Duyệt thư viện truyện: liệt kê thể loại, xem truyện theo thể loại, hoặc gợi ý ngẫu nhiên.
+    Duyệt thư viện truyện: liệt kê thể loại, xem truyện theo thể loại, gợi ý ngẫu nhiên, hoặc tra cứu thông tin chi tiết.
     
     KHÔNG tìm kiếm nội dung bên trong truyện — dùng search_library cho việc đó.
     
@@ -190,10 +196,12 @@ async def browse_library_tool(action: str, genre: Optional[str] = None) -> Dict[
     - User hỏi "truyện tiên hiệp nào?" → action='list_stories', genre='Tiên Hiệp'
     - User hỏi "recommend/giới thiệu truyện" → action='random_recommend'
     - User hỏi "có bộ nào hay?" → action='random_recommend'
+    - User hỏi "tác giả truyện X", "số chương truyện X", "URL truyện X" → action='get_story_info', title='X'
     
     Args:
-        action: 'list_genres' | 'list_stories' | 'random_recommend'
+        action: 'list_genres' | 'list_stories' | 'random_recommend' | 'get_story_info'
         genre: Tên thể loại (optional, cho list_stories và random_recommend)
+        title: Tên truyện (optional, cho get_story_info)
     
     Returns:
         Dictionary chứa kết quả tương ứng với action
@@ -275,8 +283,67 @@ async def browse_library_tool(action: str, genre: Optional[str] = None) -> Dict[
                     "recommended": len(stories)
                 }
             
+            elif action == "get_story_info":
+                # Get detailed info for a specific story by title
+                if not title:
+                    return {"error": "Cần cung cấp 'title' cho action 'get_story_info'."}
+                
+                # Subquery to count chapters per story
+                chapter_count_subq = (
+                    select(
+                        Chapter.story_id,
+                        func.count(Chapter.id).label("chapter_count")
+                    )
+                    .group_by(Chapter.story_id)
+                    .subquery()
+                )
+                
+                # Main query: fuzzy match title + join chapter count
+                query = (
+                    select(
+                        Story.title, Story.author, Story.genres,
+                        Story.status, Story.url, Story.description,
+                        Story.created_at,
+                        func.coalesce(chapter_count_subq.c.chapter_count, 0).label("chapter_count")
+                    )
+                    .outerjoin(chapter_count_subq, Story.id == chapter_count_subq.c.story_id)
+                    .where(Story.title.ilike(f"%{title}%"))
+                    .order_by(Story.title)
+                    .limit(10)
+                )
+                
+                result = await session.execute(query)
+                stories = []
+                for row in result.all():
+                    stories.append({
+                        "title": row.title,
+                        "author": row.author,
+                        "genres": row.genres,
+                        "status": row.status,
+                        "url": row.url,
+                        "description": row.description,
+                        "chapter_count": row.chapter_count,
+                        "created_at": row.created_at.isoformat() if row.created_at else None
+                    })
+                
+                if not stories:
+                    return {
+                        "action": "get_story_info",
+                        "query_title": title,
+                        "stories": [],
+                        "message": f"Không tìm thấy truyện nào có tên '{title}' trong thư viện. "
+                                   f"Bạn có thể thử search_library hoặc crawl_story để thêm truyện mới."
+                    }
+                
+                return {
+                    "action": "get_story_info",
+                    "query_title": title,
+                    "stories": stories,
+                    "total": len(stories)
+                }
+            
             else:
-                return {"error": f"Unknown action: {action}. Use 'list_genres', 'list_stories', or 'random_recommend'."}
+                return {"error": f"Unknown action: {action}. Use 'list_genres', 'list_stories', 'random_recommend', or 'get_story_info'."}
                 
     except Exception as e:
         logger.error(f"Browse library failed: {e}")

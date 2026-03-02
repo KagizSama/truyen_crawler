@@ -273,7 +273,7 @@ Nếu cần cải thiện, hãy bắt đầu bằng "BAD:" và giải thích lý
 
 CÔNG CỤ CÓ SẴN:
 - search_library: Tìm kiếm NỘI DUNG truyện (nhân vật, cốt truyện, sự kiện) trong thư viện
-- browse_library: Duyệt thư viện — liệt kê thể loại, xem truyện theo thể loại, gợi ý truyện
+- browse_library: Duyệt thư viện — liệt kê thể loại, xem truyện theo thể loại, gợi ý truyện, tra cứu thông tin truyện
 - crawl_story: Tải truyện mới vào thư viện từ URL
 
 KHI NÀO DÙNG TOOL NÀO:
@@ -281,9 +281,10 @@ KHI NÀO DÙNG TOOL NÀO:
 2. User hỏi "truyện tiên hiệp" hoặc "truyện [thể loại]" → browse_library(action='list_stories', genre='Tiên Hiệp')
 3. User hỏi "recommend/giới thiệu/có gì hay" → browse_library(action='random_recommend')
 4. User hỏi "giới thiệu truyện [thể loại]" → browse_library(action='random_recommend', genre='...')
-5. User hỏi về nội dung/nhân vật/cốt truyện → search_library(query='...')
-6. User muốn tóm tắt truyện → search_library(query='tên truyện')
-7. User cung cấp URL để tải truyện → crawl_story(url='...')
+5. User hỏi thông tin truyện (tác giả, số chương, URL, trạng thái) → browse_library(action='get_story_info', title='tên truyện')
+6. User hỏi về nội dung/nhân vật/cốt truyện → search_library(query='...')
+7. User muốn tóm tắt truyện → search_library(query='tên truyện')
+8. User cung cấp URL để tải truyện → crawl_story(url='...')
 
 QUY TẮC QUAN TRỌNG:
 1. LUÔN THỬ GỌI TOOL TRƯỚC — TUYỆT ĐỐI KHÔNG nói "tôi không có khả năng" mà không thử tool
@@ -352,6 +353,24 @@ LƯU Ý:
             logger.info(f"Trimming history: {len(previous_messages)} → {MAX_HISTORY_MESSAGES} messages")
             previous_messages = previous_messages[-MAX_HISTORY_MESSAGES:]
         
+        # === Sanitize history: remove tool call/response to avoid Gemini ordering errors ===
+        # Gemini requires: function call must come after user turn or function response turn.
+        # Old tool messages from previous conversations violate this rule.
+        sanitized_messages = []
+        for msg in previous_messages:
+            if isinstance(msg, ToolMessage):
+                # Skip tool response messages from old conversations
+                continue
+            if isinstance(msg, AIMessage) and msg.tool_calls:
+                # Skip AI messages that contain tool calls (orphaned without ToolMessage)
+                continue
+            sanitized_messages.append(msg)
+        
+        if len(sanitized_messages) != len(previous_messages):
+            logger.info(f"Sanitized history: {len(previous_messages)} → {len(sanitized_messages)} messages (removed tool call/response pairs)")
+        
+        previous_messages = sanitized_messages
+        
         # Build initial state
         initial_state: AgentState = {
             "messages": previous_messages + [
@@ -373,6 +392,15 @@ LƯU Ý:
                 logger.error(f"Quota exceeded: {e}")
                 return {
                     "answer": "Rất xin lỗi, hiện tại hệ thống AI đang bị quá tải (hết quota Google). Vui lòng thử lại sau giây lát hoặc liên hệ quản trị viên.",
+                    "sources": [],
+                    "session_id": session_id
+                }
+            if "Invalid argument" in str(e) or "function call turn" in str(e):
+                logger.error(f"Gemini message ordering error: {e}")
+                # Clear corrupted session state so next request works
+                await self.checkpointer.put(session_id, {"messages": []})
+                return {
+                    "answer": "Xin lỗi, đã xảy ra lỗi kỹ thuật với lịch sử chat. Mình đã reset phiên — bạn vui lòng hỏi lại nhé!",
                     "sources": [],
                     "session_id": session_id
                 }

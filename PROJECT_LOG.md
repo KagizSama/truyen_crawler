@@ -1,6 +1,6 @@
 # 📖 Truyen Crawler — Project Log
 
-> **Cập nhật lần cuối**: 2026-03-01
+> **Cập nhật lần cuối**: 2026-03-02
 >
 > Tài liệu này ghi lại lịch sử phát triển, kiến trúc, và các quyết định kỹ thuật quan trọng của dự án.
 
@@ -295,6 +295,42 @@ agent_node → reflect_node → [GOOD] → END
 - CDN: `https://md-block.verou.me/md-block.js` (loaded as ES module)
 - Không cần thêm dependency vào `package.json` — chỉ dùng CDN
 - Cả user message lẫn bot message đều đi qua `<md-block>`, nhưng user message thường plain text nên không ảnh hưởng
+
+---
+
+### Phase 10: Story Info Query Tool (02/03/2026)
+
+**Mục tiêu**: Cho phép agent trả lời câu hỏi về thông tin cụ thể của một bộ truyện (tác giả, số chương, URL, trạng thái...) bằng cách query trực tiếp database.
+
+**Vấn đề trước đó**: Agent đã có `browse_library` tool nhưng chỉ hỗ trợ `list_genres`, `list_stories`, `random_recommend`. Khi user hỏi "tác giả truyện X là ai?", "truyện X có bao nhiêu chương?", "URL truyện X" → agent không có action phù hợp → trả lời sai hoặc nói "không biết".
+
+**Thay đổi chính**:
+
+| File | Thay đổi |
+|------|----------|
+| `langgraph_tools.py` | Thêm field `title` vào `BrowseLibraryInput`, thêm action `get_story_info` |
+| `langgraph_agent.py` | Cập nhật system prompt: thêm rule #5 cho `get_story_info` |
+
+**Action `get_story_info`**:
+
+| Input | Output |
+|-------|--------|
+| `title`: tên truyện (fuzzy match ILIKE) | `title`, `author`, `genres`, `status`, `url`, `description`, `chapter_count`, `created_at` |
+
+**Ghi chú kỹ thuật**:
+- Chapter count sử dụng subquery COUNT + LEFT JOIN — trả 0 nếu chưa có chapters
+- Fuzzy match bằng `ILIKE '%title%'` — tìm cả partial match
+- Limit 10 kết quả trả về
+- Nếu không tìm thấy → gợi ý dùng `search_library` hoặc `crawl_story`
+
+**Fix Gemini 400 "function call turn" error**:
+
+| # | Fix | File |
+|---|-----|------|
+| 1 | **Sanitize history** — loại bỏ `ToolMessage` và `AIMessage(tool_calls)` khỏi history cũ trước khi gửi Gemini | `langgraph_agent.py` |
+| 2 | **Error fallback** — bắt lỗi 400 "Invalid argument" / "function call turn", auto-reset session corrupted | `langgraph_agent.py` |
+
+**Nguyên nhân**: Gemini yêu cầu function call phải nằm ngay sau user turn hoặc function response turn. Khi load history từ Redis, tool call/response cũ vi phạm quy tắc ordering → Gemini reject 400.
 
 ---
 
